@@ -27,8 +27,8 @@ class BlockchainMaster:
             return self.handle_balance_transaction(client_addr)
         elif msg_dict["type"] == "transfer_transaction":
             return self.handle_transfer_transaction(msg_dict, client_addr)
-
-        return "that is cool but we don't understand this lingo yet!"
+        logger.warning("that is cool but we don't understand this lingo yet!")
+        return -1
 
     def handle_transfer_transaction(self, msg_dict, client_addr):
         # return 1 if transaction executed successfully, else return 0
@@ -38,9 +38,10 @@ class BlockchainMaster:
         #TODO: sanity check if amount is a valid floating point number!
         amount = float(msg_dict['amount'])  # extract amount from msg
         result = self.blockchain.execute_transaction(sender, receiver, amount)
-        if result:
-            return "transaction_executed"
-        return "transaction_failed"
+        return result
+        # if result:
+        #     return "transaction_executed"
+        # return "transaction_failed"
 
     def handle_balance_transaction(self, client_addr):
         return self.blockchain.get_balance(client_addr)

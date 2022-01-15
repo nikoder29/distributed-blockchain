@@ -27,15 +27,16 @@ class Blockchain:
     def execute_transaction(self, sender, receiver, amount):
         # check if sender has sufficient balance
         # add block to the chain if the above holds true
-        # return True if block added successfully
-        # else return false
+        # return 0 if block added successfully
+        # else return 1 if the client has insufficient balance
+        # return 2 for any other kind of error
         # if sender == receiver, return True without executing anything
         sender_balance = self.get_balance(sender)
         if sender_balance < amount:
-            return False
+            return 1
 
         self.add_block(sender, receiver, amount, self.get_previous_block_hash())
-        return True
+        return 0
 
     @staticmethod
     def hash(block):
