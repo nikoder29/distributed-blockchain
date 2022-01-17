@@ -4,7 +4,7 @@ import json
 import sys
 import pathlib
 import os
-
+import time
 
 from constants import *
 
@@ -33,10 +33,11 @@ class Client:
 
     def get_response_from_server(self, msg_dict, client_socket):
         msg_str = json.dumps(msg_dict)
-        logger.debug('Sent : ' + msg_str)
+        logger.debug('Message sent to blockchain master : ' + msg_str)
+        time.sleep(2)
         client_socket.sendall(msg_str.encode())
         data = client_socket.recv(1024).decode()
-        logger.debug('Received : ' + repr(data))
+        logger.debug('Message received from blockchain master : ' + repr(data))
         return data
 
     def start_client(self, client_host, client_port):
@@ -77,11 +78,14 @@ class Client:
         msg_dict = {'type': 'transfer_transaction', 'receiver': receiver_addr, 'amount': amount}
         response = self.get_response_from_server(msg_dict, client_socket)
         if response == '0':
-            print("Your transaction executed successfully")
+            print("SUCCESS")
+            # print("Your transaction executed successfully")
         elif response == '1':
-            print("The transaction failed due to insufficient funds!")
+            print("INCORRECT")
+            # print("The transaction failed due to insufficient funds!")
         elif response == '2':
-            print("The transaction failed due to an error. Try again after sometime !")
+            print("INCORRECT")
+            # print("The transaction failed due to an error. Try again after sometime !")
 
 
 if __name__ == '__main__':
