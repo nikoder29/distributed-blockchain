@@ -39,7 +39,7 @@ class Client:
         #    logger.info(repr(self.request_queue.get()))
 
         self.start_client(host, port)
-        
+
         # self.host = host
         # self.port = port
 
@@ -58,6 +58,10 @@ class Client:
         logger.debug('Message received from blockchain master : ' + repr(data))
         return data
 
+    def update_current_clock(self, new_clock):
+        old_clock = self.timestamp.lamport_clock
+        self.timestamp.lamport_clock = max(old_clock, new_clock) + 1
+
     def start_client(self, client_host, client_port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
 
@@ -71,12 +75,14 @@ class Client:
                     self.handle_transfer_transaction(client_socket)
 
                 elif user_input == "2":
-                    msg_dict = {'type': 'balance_transaction'}
+                    msg_dict = {'type': 'balance_transaction', \
+                                'timestamp': repr(self.timestamp)}
                     response = self.get_response_from_server(msg_dict, client_socket)
                     logger.info("Your current balance is : $" + response)
 
                 elif user_input == "3":
-                    msg_dict = {'type': 'quit'}
+                    msg_dict = {'type': 'quit', \
+                                'timestamp': repr(self.timestamp)}
                     self.get_response_from_server(msg_dict, client_socket)
                     logger.info("Bye..have a good one!")
                     break
@@ -93,7 +99,10 @@ class Client:
             return
         receiver_addr = self.client_dict[receiver_id]['host'] + ":" + str(self.client_dict[receiver_id]['port'])
         amount = input("Enter the amount in $$ to be transferred to the above client  >> ")
-        msg_dict = {'type': 'transfer_transaction', 'receiver': receiver_addr, 'amount': amount}
+        msg_dict = {'type': 'transfer_transaction', \
+                    'timestamp': repr(self.timestamp), \
+                    'receiver': receiver_addr, \
+                    'amount': amount}
         response = self.get_response_from_server(msg_dict, client_socket)
         if response == '0':
             print("SUCCESS")
