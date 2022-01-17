@@ -4,9 +4,12 @@ import time
 import json
 import selectors
 import types
+import os
 
 from blockchain_utils import Blockchain
 from constants import *
+
+from lamport_mutex_utils import *
 
 logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
                     datefmt='%Y-%m-%d:%H:%M:%S',
@@ -17,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 class BlockchainMaster:
     def __init__(self):
+        self.timestamp = Timestamp(1, os.getpid())
         self.blockchain = Blockchain()
         self.lsock = None
         self.start_server()
@@ -25,9 +29,20 @@ class BlockchainMaster:
         logger.debug("closing the server socket..")
         self.lsock.close()
 
+    def update_current_clock(self, new_clock):
+        old_clock = self.timestamp.lamport_clock
+        self.timestamp.lamport_clock = max(old_clock, new_clock) + 1
+
     def handle_message(self, msg, client_addr):
         # TODO: add sanity check for json
         msg_dict = json.loads(msg.decode())
+        new_clock = msg_dict['timestamp']['lamport_clock']
+
+        logger.info("The incoming timestamps is " +  str(new_clock))
+
+
+        self.update_current_clock(new_clock)
+
         if msg_dict["type"] == "quit":
             return "quit"
         elif msg_dict["type"] == "balance_transaction":
@@ -73,8 +88,12 @@ class BlockchainMaster:
                 logger.info(f"Message received from client {client_addr} : " + str(recv_data))
                 response = self.handle_message(recv_data, client_addr)
                 time.sleep(2)
-                sock.sendall(str(response).encode())
-                logger.info(f"Message sent to client {client_addr} : " + str(response))
+                self.update_current_clock(0) # This will increment the current clock by 1
+                resp_dict = {'response': response, \
+                             'timestamp': self.timestamp.get_dict()}
+                str_resp = json.dumps(resp_dict)
+                sock.sendall(str_resp.encode())
+                logger.info(f"Message sent to client {client_addr} : " + str_resp)
             else:
                 print('closing connection to : ', data.addr)
                 selector.unregister(sock)
