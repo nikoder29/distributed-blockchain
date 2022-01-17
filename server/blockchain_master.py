@@ -5,7 +5,7 @@ import json
 import selectors
 import types
 
-from blockchain import Blockchain
+from blockchain_utils import Blockchain
 from constants import *
 
 logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
