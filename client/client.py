@@ -6,7 +6,9 @@ import pathlib
 import os
 import time
 
+from queue import PriorityQueue
 from constants import *
+from lamport_mutex_utils import *
 
 logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
     datefmt='%Y-%m-%d:%H:%M:%S',
@@ -21,7 +23,23 @@ class Client:
         logger.info("Host : " + host)
         logger.info("Port :" + str(port))
         self.client_dict = client_dict
+
+        self.timestamp = Timestamp(0, os.getpid())
+        self.request_queue = PriorityQueue()
+
+        # Testing the priority queue
+
+        #self.request_queue.put(Timestamp(10, 1234))
+        #self.request_queue.put(Timestamp(1, 4321))
+        #self.request_queue.put(Timestamp(3, 3758))
+        #self.request_queue.put(Timestamp(3, 2345))
+        #self.request_queue.put(Timestamp(6, 9577))
+
+        #while self.request_queue:
+        #    logger.info(repr(self.request_queue.get()))
+
         self.start_client(host, port)
+        
         # self.host = host
         # self.port = port
 
