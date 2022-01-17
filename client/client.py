@@ -76,13 +76,13 @@ class Client:
 
                 elif user_input == "2":
                     msg_dict = {'type': 'balance_transaction', \
-                                'timestamp': repr(self.timestamp)}
+                                'timestamp': self.timestamp.get_dict()}
                     response = self.get_response_from_server(msg_dict, client_socket)
                     logger.info("Your current balance is : $" + response)
 
                 elif user_input == "3":
                     msg_dict = {'type': 'quit', \
-                                'timestamp': repr(self.timestamp)}
+                                'timestamp': self.timestamp.get_dict()}
                     self.get_response_from_server(msg_dict, client_socket)
                     logger.info("Bye..have a good one!")
                     break
@@ -100,7 +100,7 @@ class Client:
         receiver_addr = self.client_dict[receiver_id]['host'] + ":" + str(self.client_dict[receiver_id]['port'])
         amount = input("Enter the amount in $$ to be transferred to the above client  >> ")
         msg_dict = {'type': 'transfer_transaction', \
-                    'timestamp': repr(self.timestamp), \
+                    'timestamp': self.timestamp.get_dict(), \
                     'receiver': receiver_addr, \
                     'amount': amount}
         response = self.get_response_from_server(msg_dict, client_socket)

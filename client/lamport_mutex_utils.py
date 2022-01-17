@@ -1,4 +1,5 @@
 from functools import total_ordering
+import json
 
 @total_ordering
 class Timestamp:
@@ -13,6 +14,11 @@ class Timestamp:
     def __eq__(self, obj):
         return ((self.lamport_clock == obj.lamport_clock)\
             and (self.pid == obj.pid))
+
+    def get_dict (self):
+        return {'lamport_clock': self.lamport_clock, \
+                'pid': self.pid }
   
     def __repr__(self):
-        return " ".join(["Lamport Clock:", str(self.lamport_clock), " pid:", str(self.pid)])
+        #return " ".join(["Lamport Clock:", str(self.lamport_clock), " pid:", str(self.pid)])
+        return json.dumps(self.get_dict())
