@@ -1,5 +1,6 @@
 from typing import List
 import hashlib
+from lamport_mutex_utils import Timestamp
 
 class Block:
     class Transaction:
@@ -61,9 +62,5 @@ class Blockchain:
     def get_previous_block_hash(self):
         return Blockchain.hash(self.chain[-1])
         
-class Timestamp:
-    def __init__(self, lamport_clock, pid):
-        self.lamport_clock = lamport_clock
-        self.pid = pid
     
     
