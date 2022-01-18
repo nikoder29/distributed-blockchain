@@ -25,22 +25,22 @@ class BlockchainMaster:
         logger.debug("closing the server socket..")
         self.lsock.close()
 
-    def handle_message(self, msg, client_addr):
+    def handle_message(self, msg):
         # TODO: add sanity check for json
         msg_dict = json.loads(msg.decode())
         if msg_dict["type"] == "quit":
             return "quit"
         elif msg_dict["type"] == "balance_transaction":
-            return self.handle_balance_transaction(client_addr)
+            return self.handle_balance_transaction(msg_dict['client_id'])
         elif msg_dict["type"] == "transfer_transaction":
-            return self.handle_transfer_transaction(msg_dict, client_addr)
+            return self.handle_transfer_transaction(msg_dict)
         logger.warning("that is cool but we don't understand this lingo yet!")
         return -1
 
-    def handle_transfer_transaction(self, msg_dict, client_addr):
+    def handle_transfer_transaction(self, msg_dict):
         # return 1 if transaction executed successfully, else return 0
         #TODO: fix the format for client_addr
-        sender = client_addr
+        sender = msg_dict['sender']
         receiver = msg_dict['receiver']  # extract receiver from msg
         #TODO: sanity check if amount is a valid floating point number!
         amount = float(msg_dict['amount'])  # extract amount from msg
@@ -50,8 +50,8 @@ class BlockchainMaster:
         #     return "transaction_executed"
         # return "transaction_failed"
 
-    def handle_balance_transaction(self, client_addr):
-        return self.blockchain.get_balance(client_addr)
+    def handle_balance_transaction(self, client_id):
+        return self.blockchain.get_balance(client_id)
 
     def accept_wrapper(self, sock, selector):
         conn, addr = sock.accept()  # Should be ready to read
@@ -60,6 +60,8 @@ class BlockchainMaster:
         data = types.SimpleNamespace(addr=addr, inb=b'', outb=b'')
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
         selector.register(conn, events, data=data)
+
+        # print(selector.get_map())
 
     def service_connection(self, key, mask, selector):
         sock = key.fileobj
@@ -71,7 +73,7 @@ class BlockchainMaster:
                 # data.outb += recv_data
                 client_addr = client_host + ":" + str(client_port)
                 logger.info(f"Message received from client {client_addr} : " + str(recv_data))
-                response = self.handle_message(recv_data, client_addr)
+                response = self.handle_message(recv_data)
                 time.sleep(2)
                 sock.sendall(str(response).encode())
                 logger.info(f"Message sent to client {client_addr} : " + str(response))
@@ -101,25 +103,6 @@ class BlockchainMaster:
                     self.accept_wrapper(key.fileobj, selector)
                 else:
                     self.service_connection(key, mask, selector)
-
-    # def start_server(self):
-    #     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-    #         server_socket.bind((SERVER_HOST, SERVER_PORT))
-    #         server_socket.listen()
-    #         logger.info("Waiting on new connections...")
-    #         conn, addr = server_socket.accept()
-    #         with conn:
-    #             logger.info('Connected by : ' + str(addr))
-    #             while True:
-    #                 data = conn.recv(1024)
-    #                 if not data:
-    #                     continue
-    #                 response = self.handle_message(data, str(addr))
-    #                 #TODO: server should also send a json wrapped msg to client.
-    #                 conn.sendall(str(response).encode())
-    #                 if response == 'quit':
-    #                     logger.info("Closing the connection : " + str(addr))
-    #                     break
 
 
 if __name__ == '__main__':
