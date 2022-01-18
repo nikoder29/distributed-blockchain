@@ -1,6 +1,5 @@
 from typing import List
 import hashlib
-from lamport_mutex_utils import Timestamp
 
 class Block:
     class Transaction:
