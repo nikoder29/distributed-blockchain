@@ -1,3 +1,4 @@
+import selectors
 import socket
 import logging
 import json
@@ -5,6 +6,9 @@ import sys
 import pathlib
 import os
 import time
+import threading
+import types
+from queue import Queue
 
 from constants import *
 
@@ -17,13 +21,31 @@ logger = logging.getLogger(__name__)
 
 class Client:
 
-    def __init__(self, host, port, client_dict):
-        logger.info("Host : " + host)
-        logger.info("Port :" + str(port))
+    def __init__(self, client_id, client_dict):
+        self.peer_clients_queue = Queue()
+        self.processor_queue = Queue()
         self.client_dict = client_dict
-        self.start_client(host, port)
+        self.event = threading.Event()
+        self.client_id = client_id
+        self.client_dict = client_dict
+        # client_thread = threading.Thread(target=self.start_peer_clients, args=(client_dict, client_id, self.peer_clients_queue))
+        # client_thread.daemon = True
+        self.peer_client_dict = {}
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_thread = threading.Thread(target=self.start_server, args=(client_dict, client_id, self.event, self.peer_client_dict, self.server_socket))
+        server_thread.daemon = True
+        server_thread.start()
+        time.sleep(15)
+        self.popualate_peer_client_dict()
+        self.start_master_client()
+        # self.start_client(host, port)
         # self.host = host
         # self.port = port
+
+    def __del__(self):
+        for _, conn in self.peer_client_dict.items():
+            conn.close()
+        self.server_socket.close()
 
     @staticmethod
     def display_menu():
@@ -40,22 +62,112 @@ class Client:
         logger.debug('Message received from blockchain master : ' + repr(data))
         return data
 
-    def start_client(self, client_host, client_port):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+    def accept_wrapper(self, sock, selector):
+        conn, addr = sock.accept()  # Should be ready to read
+        print('accepted connection from', addr)
+        conn.setblocking(False)
+        data = types.SimpleNamespace(addr=addr, inb=b'', outb=b'')
+        events = selectors.EVENT_READ | selectors.EVENT_WRITE
+        selector.register(conn, events, data=data)
 
-            client_socket.bind((client_host, client_port))
-            client_socket.connect((SERVER_HOST, SERVER_PORT))
+        # print(selector.get_map())
+
+    def service_connection(self, key, mask, selector, peer_client_dict, client_id):
+        sock = key.fileobj
+        data = key.data
+        client_host, client_port = sock.getpeername()
+        if mask & selectors.EVENT_READ:
+            recv_data = sock.recv(1024)  # Should be ready to read
+            if recv_data:
+                peer_client_addr = client_host + ":" + str(client_port)
+                logger.info(f"Message received from client {peer_client_addr} : " + str(recv_data))
+                res = self.handle_message(recv_data, client_id, peer_client_dict)
+                time.sleep(2)
+                return res
+                # sock.sendall(str(response).encode())
+                # logger.info(f"Message sent to client {client_addr} : " + str(response))
+            else:
+                print('closing connection to : ', data.addr)
+                selector.unregister(sock)
+                sock.close()
+        return 0
+
+
+    def start_server(self, client_dict, client_id, event, peer_client_dict, server_socket):
+        server_host = client_dict[client_id]["server_host"]
+        server_port = client_dict[client_id]["server_port"]
+
+        selector = selectors.DefaultSelector()
+        # self.lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        while True:
+            try:
+                server_socket.bind((server_host, server_port))
+                break
+            except Exception as ex:
+                logger.error(ex)
+                time.sleep(5)
+
+        server_socket.listen()
+        logger.info("Server is up and running!")
+        logger.info("Waiting on new connections...")
+        server_socket.setblocking(False)
+        selector.register(server_socket, selectors.EVENT_READ, data=None)
+        peer_reply_count = 0
+        total_number_of_clients = len(client_dict) - 1
+        while True:
+            events = selector.select(timeout=None)
+            for key, mask in events:
+                if key.data is None:
+                    self.accept_wrapper(key.fileobj, selector)
+                else:
+                    peer_reply_count += self.service_connection(key, mask, selector, peer_client_dict, client_id)
+                    if peer_reply_count == total_number_of_clients:
+                        # this set event will be read by the main client, before sending a request to the blockchain server
+                        event.set()
+                        peer_reply_count = 0
+
+    def wait_for_consensus_from_peers(self):
+        # TODO: ADD LAMPORT STUFF IN THE PAYLOAD
+        request_dict = {"type": "REQUEST", "client_id": self.client_id}
+        for client_id, conn in self.peer_client_dict.items():
+            # TODO: ADD SLEEP TIMER
+            conn.sendall(json.dumps(request_dict).encode())
+            logger.info(f"Message sent to client {client_id} : " + str(request_dict))
+        # waiting for consensus ( REPLY ) from all the peers, to be set by the server
+        self.event.wait()
+
+    def send_release_to_peers(self):
+        release_dict = {"type": "RELEASE", "client_id": self.client_id}
+        for client_id, conn in self.peer_client_dict.items():
+            # TODO: ADD SLEEP TIMER
+            conn.sendall(json.dumps(release_dict).encode())
+            logger.info(f"Message sent to client {client_id} : " + str(release_dict))
+        # waiting for consensus ( REPLY ) from all the peers, to be set by the server
+        self.event.clear()
+
+    def start_master_client(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+            # sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # sock.setblocking(False)
+            # client_socket.bind((client_dict[client_id]["client_host"], client_dict[client_id]["client_port"]))
+            client_socket.connect((BLOCKCHAIN_SERVER_HOST, BLOCKCHAIN_SERVER_PORT))
+            logger.info("Now connected to the blockchain server!")
+            self.handle_balance_transaction(client_socket)
 
             while True:
                 self.display_menu()
                 user_input = input("Client prompt >> ")
                 if user_input == "1":
+                    self.wait_for_consensus_from_peers()
+                    self.handle_balance_transaction(client_socket)
                     self.handle_transfer_transaction(client_socket)
+                    self.handle_balance_transaction(client_socket)
+                    self.send_release_to_peers()
 
                 elif user_input == "2":
-                    msg_dict = {'type': 'balance_transaction'}
-                    response = self.get_response_from_server(msg_dict, client_socket)
-                    logger.info("Your current balance is : $" + response)
+                    self.wait_for_consensus_from_peers()
+                    self.handle_balance_transaction(client_socket)
+                    self.send_release_to_peers()
 
                 elif user_input == "3":
                     msg_dict = {'type': 'quit'}
@@ -67,15 +179,22 @@ class Client:
                     logger.warning("Incorrect menu option. Please try again..")
                     continue
 
+    def handle_balance_transaction(self, client_socket):
+        msg_dict = {'type': 'balance_transaction', 'client_id': self.client_id}
+        response = self.get_response_from_server(msg_dict, client_socket)
+        logger.info("Your current balance is : $" + response)
+
     def handle_transfer_transaction(self, client_socket):
         receiver_id = input("Enter receiver client id  >> ")
-        # TODO : add check if receiver is available in the config list or not
+        # add check if receiver is available in the config list or not
         if receiver_id not in self.client_dict:
             logger.error("Client id does not exist. Please try again with a valid client id..")
             return
-        receiver_addr = self.client_dict[receiver_id]['host'] + ":" + str(self.client_dict[receiver_id]['port'])
+        # receiver_addr = self.client_dict[receiver_id]['host'] + ":" + str(self.client_dict[receiver_id]['port'])
         amount = input("Enter the amount in $$ to be transferred to the above client  >> ")
-        msg_dict = {'type': 'transfer_transaction', 'receiver': receiver_addr, 'amount': amount}
+        # assuming that all clients will do the right thing, and not impersonate self as any other client
+        # we can enforce this by not sending the sender client address, and having the blockchain figure that out from the connection object
+        msg_dict = {'type': 'transfer_transaction', 'sender': self.client_id, 'receiver': receiver_id, 'amount': amount}
         response = self.get_response_from_server(msg_dict, client_socket)
         if response == '0':
             print("SUCCESS")
@@ -87,18 +206,62 @@ class Client:
             print("INCORRECT")
             # print("The transaction failed due to an error. Try again after sometime !")
 
+    def popualate_peer_client_dict(self):
+        # connect to the server of all other clients
+        for other_client_id, client_details in self.client_dict.items():
+            if other_client_id == self.client_id:
+                continue
+
+            # client_thread = threading.Thread(target=self.handle_peer_connection,
+            #                                  args=(client_details["server_host"], client_details["server_port"]))
+            server_addr = (client_details["server_host"], client_details["server_port"])
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # sock.setblocking(True)
+            logger.info("Trying to connect to peer : " + other_client_id)
+            while True:
+                exit_code = sock.connect_ex(server_addr)
+                print(exit_code)
+                time.sleep(2)
+                if exit_code == 0 or exit_code == 56:
+                    break
+            logger.info("Now connected to peer : " + other_client_id)
+            self.peer_client_dict[other_client_id] = sock
+
+
+    def handle_message(self, msg, client_id, peer_client_dict):
+        msg_dict = json.loads(msg.decode())
+        if msg_dict["type"] == "REQUEST":
+            requester_client_id = msg_dict["client_id"]
+            # do lamport stuff
+            # send reply to the server of the appropriate peer
+            # TODO: ADD LAMPORT DETAILS IN THE PAYLOAD
+            conn = peer_client_dict[requester_client_id]
+            response_dict = {'type': 'REPLY', 'client_id': client_id}
+            # TODO: ADD SLEEP TIMER
+            conn.sendall(json.dumps(response_dict).encode())
+            logger.info(f"Message sent to client {requester_client_id} : " + str(response_dict))
+            return 0
+        elif msg_dict["type"] == "REPLY":
+            # TODO:
+            return 1
+        elif msg_dict["type"] == "RELEASE":
+            # TODO:
+            return 0
+
+
+
 
 if __name__ == '__main__':
 
-    client_id = sys.argv[1]
+    argv_client_id = sys.argv[1]
     with open(os.path.join(pathlib.Path(__file__).parent.resolve(),'config.json'), 'r') as config_file:
         config_dict = json.load(config_file)
         client_dict = config_dict["clients"]
-        if client_id not in client_dict:
+        if argv_client_id not in client_dict:
             logger.error("Invalid client id. Please check...")
         else:
             logger.info("Initiating client..")
-            Client(client_dict[client_id]["host"], client_dict[client_id]["port"], client_dict)
+            Client(argv_client_id, client_dict)
 
 
 
