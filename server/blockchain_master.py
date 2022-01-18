@@ -4,8 +4,9 @@ import time
 import json
 import selectors
 import types
+import os
 
-from blockchain import Blockchain
+from blockchain_utils import Blockchain
 from constants import *
 
 logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
@@ -75,6 +76,7 @@ class BlockchainMaster:
                 logger.info(f"Message received from client {client_addr} : " + str(recv_data))
                 response = self.handle_message(recv_data)
                 time.sleep(2)
+            
                 sock.sendall(str(response).encode())
                 logger.info(f"Message sent to client {client_addr} : " + str(response))
             else:
