@@ -24,7 +24,7 @@ class Client:
         logger.info("Port :" + str(port))
         self.client_dict = client_dict
 
-        self.timestamp = Timestamp(0, os.getpid())
+        self.timestamp = Timestamp(1, os.getpid())
         self.request_queue = PriorityQueue()
 
         # Testing the priority queue
@@ -51,11 +51,20 @@ class Client:
 
     def get_response_from_server(self, msg_dict, client_socket):
         msg_str = json.dumps(msg_dict)
+        logger.info(" \n>> Lamport clock before updating (send event): " + str(self.timestamp.lamport_clock))
+        # update my clock before sending a message to the server.
+        self.update_current_clock(0) # This will increment the current clock by 1
+        logger.info(" \n>> Lamport clock after updating (send event): " + str(self.timestamp.lamport_clock))
+
         logger.debug('Message sent to blockchain master : ' + msg_str)
         time.sleep(2)
         client_socket.sendall(msg_str.encode())
         data = client_socket.recv(1024).decode()
         logger.debug('Message received from blockchain master : ' + repr(data))
+        # update my clock after receiving a message from the server
+        logger.info(" \n>> Lamport clock before updating (receive event): " + str(self.timestamp.lamport_clock))
+        self.update_current_clock(0) 
+        logger.info(" \n>> Lamport clock after updating (receive event): " + str(self.timestamp.lamport_clock))
         return data
 
     def update_current_clock(self, new_clock):
