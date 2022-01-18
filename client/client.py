@@ -84,21 +84,21 @@ class Client:
                     self.handle_transfer_transaction(client_socket)
 
                 elif user_input == "2":
-                    msg_dict = {'type': 'balance_transaction', \
-                                'timestamp': self.timestamp.get_dict()}
-                    response = self.get_response_from_server(msg_dict, client_socket)
-                    logger.info("Your current balance is : $" + response)
+                    self.handle_balance_transaction(client_socket)
 
                 elif user_input == "3":
-                    msg_dict = {'type': 'quit', \
-                                'timestamp': self.timestamp.get_dict()}
-                    self.get_response_from_server(msg_dict, client_socket)
-                    logger.info("Bye..have a good one!")
+                    self.handle_quit(client_socket)
                     break
 
                 else:
                     logger.warning("Incorrect menu option. Please try again..")
                     continue
+    
+    def handle_balance_transaction(self, client_socket):
+        msg_dict = {'type': 'balance_transaction', \
+                    'timestamp': self.timestamp.get_dict()}
+        response = self.get_response_from_server(msg_dict, client_socket)
+        logger.info("Your current balance is : $" + response)
 
     def handle_transfer_transaction(self, client_socket):
         receiver_id = input("Enter receiver client id  >> ")
@@ -123,6 +123,11 @@ class Client:
             print("INCORRECT")
             # print("The transaction failed due to an error. Try again after sometime !")
 
+    def handle_quit(self, client_socket):
+        msg_dict = {'type': 'quit', \
+                    'timestamp': self.timestamp.get_dict()}
+        self.get_response_from_server(msg_dict, client_socket)
+        logger.info("Bye..have a good one!")
 
 if __name__ == '__main__':
 
