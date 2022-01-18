@@ -94,11 +94,31 @@ class Client:
                     logger.warning("Incorrect menu option. Please try again..")
                     continue
     
+    def request_mutex(self):
+        #TODO Process sends time stamped request to all processes
+        self.request_queue.put(self.timestamp)
+
+        #TODO wait for all the processes to reply
+
+        # Get the first element in the priority queue.
+        allowed = self.request_queue.get()
+        if allowed.pid == self.pid:
+            return # ? meaning end ?
+        
+    def reply_mutex(self):
+        pass
+
+    def release(self):
+        pass
+
     def handle_balance_transaction(self, client_socket):
+        self.request_mutex()
         msg_dict = {'type': 'balance_transaction', \
                     'timestamp': self.timestamp.get_dict()}
         response = self.get_response_from_server(msg_dict, client_socket)
+        self.release()
         logger.info("Your current balance is : $" + response)
+        return int(response)
 
     def handle_transfer_transaction(self, client_socket):
         receiver_id = input("Enter receiver client id  >> ")
@@ -108,11 +128,22 @@ class Client:
             return
         receiver_addr = self.client_dict[receiver_id]['host'] + ":" + str(self.client_dict[receiver_id]['port'])
         amount = input("Enter the amount in $$ to be transferred to the above client  >> ")
+        
+        current_balance = self.handle_balance_transaction(client_socket)
+        if amount > current_balance:
+            logger.error("Insufficient balance! Please try again with a smaller transfer.")
+            return
+        
+        self.request_mutex()
+
         msg_dict = {'type': 'transfer_transaction', \
                     'timestamp': self.timestamp.get_dict(), \
                     'receiver': receiver_addr, \
                     'amount': amount}
         response = self.get_response_from_server(msg_dict, client_socket)
+        
+        self.release()
+        
         if response == '0':
             print("SUCCESS")
             # print("Your transaction executed successfully")
