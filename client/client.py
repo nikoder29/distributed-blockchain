@@ -108,7 +108,7 @@ class Client:
             if recv_data:
                 peer_client_addr = client_host + ":" + str(client_port)
                 logger.info(f"Message received from client {peer_client_addr} : " + str(recv_data))
-                res = self.handle_message(recv_data, client_id, peer_client_dict)
+                res = self.handle_message_from_peer(recv_data, client_id, peer_client_dict)
                 time.sleep(2)
                 return res
                 # sock.sendall(str(response).encode())
@@ -152,22 +152,30 @@ class Client:
                 else:
                     peer_reply_count += self.service_connection(key, mask, selector, peer_client_dict, client_id)
                     if peer_reply_count == total_number_of_clients:
+                        # If all peers replied, it means that I am at the head of the list
+                        assert  self.request_queue.empty() or \
+                                self.request_queue.queue[0].pid == self.timestamp.pid, "Head of queue assert failed!"
+
                         # this set event will be read by the main client, before sending a request to the blockchain server
                         event.set()
                         peer_reply_count = 0
 
     def wait_for_consensus_from_peers(self):
-        # TODO: ADD LAMPORT STUFF IN THE PAYLOAD
-        request_dict = {"type": "REQUEST", "client_id": self.client_id}
+        request_dict = {"type": "REQUEST", 'timestamp': self.timestamp.get_dict(), "client_id": self.client_id}
         for client_id, conn in self.peer_client_dict.items():
             # TODO: ADD SLEEP TIMER
             conn.sendall(json.dumps(request_dict).encode())
             logger.info(f"Message sent to client {client_id} : " + str(request_dict))
+        
+        # Add the client's timestamp into its local queue
+        self.request_queue.put(self.timestamp)
+        logger.info(f"Request Queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
+        
         # waiting for consensus ( REPLY ) from all the peers, to be set by the server
         self.event.wait()
 
     def send_release_to_peers(self):
-        release_dict = {"type": "RELEASE", "client_id": self.client_id}
+        release_dict = {"type": "RELEASE", 'timestamp': self.timestamp.get_dict(), "client_id": self.client_id}
         for client_id, conn in self.peer_client_dict.items():
             # TODO: ADD SLEEP TIMER
             conn.sendall(json.dumps(release_dict).encode())
@@ -207,30 +215,12 @@ class Client:
                 else:
                     logger.warning("Incorrect menu option. Please try again..")
                     continue
-    
-    def request_mutex(self):
-        #TODO Process sends time stamped request to all processes
-        self.request_queue.put(self.timestamp)
-
-        #TODO wait for all the processes to reply
-
-        # Get the first element in the priority queue.
-        allowed = self.request_queue.get()
-        if allowed.pid == self.timestamp.pid:
-            return # ? meaning end ?
-        
-    def reply_mutex(self):
-        pass
-
-    def release(self):
-        pass
 
     def handle_balance_transaction(self, client_socket):
-        self.request_mutex()
+        
         msg_dict = {'type': 'balance_transaction', 'timestamp': self.timestamp.get_dict(), \
                     'client_id': self.client_id}
         response = self.get_response_from_server(msg_dict, client_socket)
-        self.release()
         logger.info("Your current balance is : $" + response)
 
     def handle_transfer_transaction(self, client_socket):
@@ -245,13 +235,11 @@ class Client:
         # assuming that all clients will do the right thing, and not impersonate self as any other client
         # we can enforce this by not sending the sender client address, and having the blockchain figure that out from the connection object
         
-        self.request_mutex()       
+              
         msg_dict = {'type': 'transfer_transaction', 'timestamp': self.timestamp.get_dict(), \
                     'sender': self.client_id, 'receiver': receiver_id, 'amount': amount}
 
         response = self.get_response_from_server(msg_dict, client_socket)
-        
-        self.release()
         
         if response == '0':
             print("SUCCESS")
@@ -285,24 +273,39 @@ class Client:
             self.peer_client_dict[other_client_id] = sock
 
 
-    def handle_message(self, msg, client_id, peer_client_dict):
+    def handle_message_from_peer(self, msg, client_id, peer_client_dict):
         msg_dict = json.loads(msg.decode())
+        peer_client_id = msg_dict["client_id"]
+
+        # Extract the peer's Timestamp
+        peer_clock = msg_dict['timestamp']['lamport_clock']
+        peer_pid = msg_dict['timestamp']['pid']
+        peer_timestamp = Timestamp(peer_clock, peer_pid)
+        
         if msg_dict["type"] == "REQUEST":
-            requester_client_id = msg_dict["client_id"]
-            # do lamport stuff
-            # send reply to the server of the appropriate peer
-            # TODO: ADD LAMPORT DETAILS IN THE PAYLOAD
-            conn = peer_client_dict[requester_client_id]
-            response_dict = {'type': 'REPLY', 'client_id': client_id}
-            # TODO: ADD SLEEP TIMER
-            conn.sendall(json.dumps(response_dict).encode())
-            logger.info(f"Message sent to client {requester_client_id} : " + str(response_dict))
+            logger.info(f"REQUEST from client {peer_client_id} received at client {self.client_id}. ")
+            
+            # insert the requester's timestamp into the local request queue. 
+            self.request_queue.put(peer_timestamp)
+            
+            logger.info(f"Request queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
+
+            # REPLY only if I am NOT the head of the queue!! 
+            if self.request_queue.queue[0].pid != self.timestamp.pid:
+                # send reply to the server of the appropriate peer
+                conn = peer_client_dict[peer_client_id]
+                response_dict = {'type': 'REPLY', 'timestamp': self.timestamp.get_dict(), 'client_id': client_id}
+                # TODO: ADD SLEEP TIMER
+                conn.sendall(json.dumps(response_dict).encode())
+                logger.info(f"Message sent to client {peer_client_id} : " + str(response_dict))
             return 0
         elif msg_dict["type"] == "REPLY":
-            # TODO:
+            # TODO update my timestamp!!
             return 1
         elif msg_dict["type"] == "RELEASE":
-            # TODO:
+            assert self.request_queue.get().pid == peer_timestamp.pid, "RELEASE: Head of queue assert failed!"
+            # TODO: remove the request queue entry corresponding to the sender of the RELEASE: 
+            # Should be the head of the queue
             return 0
 
     def handle_quit(self, client_socket):
