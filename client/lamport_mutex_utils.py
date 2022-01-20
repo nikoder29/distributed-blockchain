@@ -6,7 +6,11 @@ class Timestamp:
     def __init__(self, lamport_clock, pid):
         self.lamport_clock = lamport_clock
         self.pid = pid
-    
+
+    @staticmethod
+    def copy(timestamp):
+        return Timestamp(timestamp.lamport_clock, timestamp.pid)
+
     def __lt__(self, obj):
         return ((self.lamport_clock < obj.lamport_clock)\
             or (((self.lamport_clock == obj.lamport_clock) and (self.pid < obj.pid))))
