@@ -72,21 +72,18 @@ class Client:
         print("c. Press 3 to quit")
 
     def get_response_from_server(self, msg_dict, client_socket):
+        # The clock was already updates before calling this function
         msg_str = json.dumps(msg_dict)
-        logger.info(" \n>> Lamport clock before updating (send event): " + str(self.timestamp.lamport_clock))
-        # update my clock before sending a message to the server.
-        self.update_current_clock(0) # This will increment the current clock by 1
-        logger.info(" \n>> Lamport clock after updating (send event): " + str(self.timestamp.lamport_clock))
-
+        
         logger.debug('Message sent to blockchain master : ' + msg_str)
         time.sleep(2)
         client_socket.sendall(msg_str.encode())
         data = client_socket.recv(1024).decode()
         logger.debug('Message received from blockchain master : ' + repr(data))
+        
         # update my clock after receiving a message from the server
-        logger.info(" \n>> Lamport clock before updating (receive event): " + str(self.timestamp.lamport_clock))
-        self.update_current_clock(0) 
-        logger.info(" \n>> Lamport clock after updating (receive event): " + str(self.timestamp.lamport_clock))
+        self.update_current_clock("Receive from server", 0) 
+        
         return data
 
     def accept_wrapper(self, sock, selector):
@@ -119,9 +116,13 @@ class Client:
                 sock.close()
         return 0
 
-    def update_current_clock(self, new_clock):
+    def update_current_clock(self, event, new_clock):
+        logger.info(f" \n++ Lamport clock before updating (event = {event}): " + str(self.timestamp.lamport_clock))
         old_clock = self.timestamp.lamport_clock
         self.timestamp.lamport_clock = max(old_clock, new_clock) + 1
+        logger.info(f" \n++ Lamport clock after updating (event = {event}): " + str(self.timestamp.lamport_clock))
+
+        
 
     def start_server(self, client_dict, client_id, event, peer_client_dict, server_socket):
         server_host = client_dict[client_id]["server_host"]
@@ -153,35 +154,65 @@ class Client:
                     peer_reply_count += self.service_connection(key, mask, selector, peer_client_dict, client_id)
                     if peer_reply_count == total_number_of_clients:
                         # If all peers replied, it means that I am at the head of the list
-                        assert  self.request_queue.empty() or \
-                                self.request_queue.queue[0].pid == self.timestamp.pid, "Head of queue assert failed!"
+                        assert  self.request_queue.queue[0].pid == self.timestamp.pid, "Head of queue assert failed!"
 
                         # this set event will be read by the main client, before sending a request to the blockchain server
                         event.set()
                         peer_reply_count = 0
 
     def wait_for_consensus_from_peers(self):
+        # update my clock before broadcasting the REQUEST to peers
+        self.update_current_clock("Send REQUEST", 0) 
+
+        # Add the client's timestamp into its local queue
+        self.request_queue.put(self.timestamp)
+        logger.info(f"Request Queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
+
         request_dict = {"type": "REQUEST", 'timestamp': self.timestamp.get_dict(), "client_id": self.client_id}
+
         for client_id, conn in self.peer_client_dict.items():
             # TODO: ADD SLEEP TIMER
             conn.sendall(json.dumps(request_dict).encode())
             logger.info(f"Message sent to client {client_id} : " + str(request_dict))
         
-        # Add the client's timestamp into its local queue
-        self.request_queue.put(self.timestamp)
-        logger.info(f"Request Queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
+        
         
         # waiting for consensus ( REPLY ) from all the peers, to be set by the server
         self.event.wait()
 
     def send_release_to_peers(self):
+        # update my clock before sending the RELEASE
+        self.update_current_clock("Send RELEASE", 0) 
+
         release_dict = {"type": "RELEASE", 'timestamp': self.timestamp.get_dict(), "client_id": self.client_id}
         for client_id, conn in self.peer_client_dict.items():
             # TODO: ADD SLEEP TIMER
             conn.sendall(json.dumps(release_dict).encode())
             logger.info(f"Message sent to client {client_id} : " + str(release_dict))
         # waiting for consensus ( REPLY ) from all the peers, to be set by the server
+
+        # Remove the queue entry corresponding to my request. 
+        self.update_request_queue(self.timestamp.pid)     
+
         self.event.clear()
+
+    def update_request_queue(self, pid_to_remove):
+        # Can't remove element by index in PriorityQueue, 
+        # so creating a new one without the entry to be deleted.
+
+        new_queue = PriorityQueue()
+        #import pdb
+        while not self.request_queue.empty():
+            # pop the first element
+            entry = self.request_queue.get()
+            #pdb.set_trace()
+            if entry.pid != pid_to_remove:
+                new_queue.put(entry)
+            
+        self.request_queue = new_queue
+
+        logger.info(f"Request queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
+    
 
     def start_master_client(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
@@ -218,6 +249,9 @@ class Client:
 
     def handle_balance_transaction(self, client_socket):
         
+        # update my clock before sending a message to the server.
+        self.update_current_clock("Send to server", 0) # This will increment the current clock by 1
+       
         msg_dict = {'type': 'balance_transaction', 'timestamp': self.timestamp.get_dict(), \
                     'client_id': self.client_id}
         response = self.get_response_from_server(msg_dict, client_socket)
@@ -235,7 +269,9 @@ class Client:
         # assuming that all clients will do the right thing, and not impersonate self as any other client
         # we can enforce this by not sending the sender client address, and having the blockchain figure that out from the connection object
         
-              
+        # update my clock before sending a message to the server.
+        self.update_current_clock("Send to server", 0) # This will increment the current clock by 1
+
         msg_dict = {'type': 'transfer_transaction', 'timestamp': self.timestamp.get_dict(), \
                     'sender': self.client_id, 'receiver': receiver_id, 'amount': amount}
 
@@ -289,11 +325,19 @@ class Client:
             self.request_queue.put(peer_timestamp)
             
             logger.info(f"Request queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
+            
+            # update my clock after receiving the REQUEST
+            self.update_current_clock("Receive REQUEST", peer_clock) 
+            
 
             # REPLY only if I am NOT the head of the queue!! 
             if self.request_queue.queue[0].pid != self.timestamp.pid:
                 # send reply to the server of the appropriate peer
                 conn = peer_client_dict[peer_client_id]
+
+                # update my clock before sending the REPLY
+                self.update_current_clock("Send REPLY", 0) 
+
                 response_dict = {'type': 'REPLY', 'timestamp': self.timestamp.get_dict(), 'client_id': client_id}
                 # TODO: ADD SLEEP TIMER
                 conn.sendall(json.dumps(response_dict).encode())
@@ -301,16 +345,25 @@ class Client:
             return 0
         elif msg_dict["type"] == "REPLY":
             # TODO update my timestamp!!
+            # update my clock after receiving the REPLY
+            self.update_current_clock("Receive REPLY", peer_clock) 
             return 1
         elif msg_dict["type"] == "RELEASE":
-            assert self.request_queue.get().pid == peer_timestamp.pid, "RELEASE: Head of queue assert failed!"
-            # TODO: remove the request queue entry corresponding to the sender of the RELEASE: 
-            # Should be the head of the queue
+            # Remove the queue entry corresponding to the sender of the RELEASE. 
+            self.update_request_queue(peer_pid)
+
+            # update my clock after receiving the RELEASE
+            self.update_current_clock("Receive RELEASE", peer_clock)
+
             return 0
 
     def handle_quit(self, client_socket):
+        # update my clock before sending a message to the server.
+        self.update_current_clock("Send to server", 0)
+        
         msg_dict = {'type': 'quit', \
                     'timestamp': self.timestamp.get_dict()}
+        
         self.get_response_from_server(msg_dict, client_socket)
         logger.info("Bye..have a good one!")
 
