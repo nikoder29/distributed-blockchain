@@ -153,12 +153,10 @@ class Client:
                 else:
                     peer_reply_count += self.service_connection(key, mask, selector, peer_client_dict, client_id)
                     if peer_reply_count == total_number_of_clients:
-                        # If all peers replied, it means that I am at the head of the list
-                        assert  self.request_queue.queue[0].pid == self.timestamp.pid, "Head of queue assert failed!"
-
-                        # this set event will be read by the main client, before sending a request to the blockchain server
-                        event.set()
-                        peer_reply_count = 0
+                        if self.request_queue.queue[0].pid == self.timestamp.pid:
+                            # this set event will be read by the main client, before sending a request to the blockchain server
+                            event.set()
+                            peer_reply_count = 0
 
     def wait_for_consensus_from_peers(self):
         # update my clock before broadcasting the REQUEST to peers
@@ -344,7 +342,6 @@ class Client:
                 logger.info(f"Message sent to client {peer_client_id} : " + str(response_dict))
             return 0
         elif msg_dict["type"] == "REPLY":
-            # TODO update my timestamp!!
             # update my clock after receiving the REPLY
             self.update_current_clock("Receive REPLY", peer_clock) 
             return 1
