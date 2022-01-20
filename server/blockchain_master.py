@@ -4,7 +4,7 @@ import time
 import json
 import selectors
 import types
-import os
+import threading
 
 from blockchain_utils import Blockchain
 from constants import *
@@ -20,11 +20,44 @@ class BlockchainMaster:
     def __init__(self):
         self.blockchain = Blockchain()
         self.lsock = None
+        #TODO : We can choose to have a lock shared bewtween the client and the server while accessing the blockchain
+        client_thread = threading.Thread(target=self.start_client)
+        client_thread.daemon = True
+        client_thread.start()
         self.start_server()
 
     def __del__(self):
         logger.debug("closing the server socket..")
         self.lsock.close()
+
+    def display_blockchain(self):
+        logger.info("Here's the latest snapshot of the blockchain : ")
+        for block in self.blockchain.chain:
+            print("--------------")
+            print(f"Transaction   : ")
+            print(f"    Sender    : {block.transaction.sender}")
+            print(f"    Receiver  : {block.transaction.receiver}")
+            print(f"    Amount    : {block.transaction.amount}")
+            print(f"Previous hash : {block.previous_hash}")
+            print("--------------")
+        print()
+
+    def display_menu(self):
+        print("a. Press 1 to display the blockchain.")
+        print("b. Press 2 to quit.")
+
+    def start_client(self):
+        while True:
+            self.display_menu()
+            user_input = input("Blockchain client prompt >> ")
+            if user_input == '1':
+                self.display_blockchain()
+            elif user_input == '2':
+                logger.info("Bye..have a good one!")
+                break
+            else:
+                logger.warning("Incorrect menu option. Please try again..")
+
 
     def handle_message(self, msg):
         # TODO: add sanity check for json
