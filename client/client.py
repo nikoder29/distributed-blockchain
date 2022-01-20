@@ -327,19 +327,17 @@ class Client:
             # update my clock after receiving the REQUEST
             self.update_current_clock("Receive REQUEST", peer_clock) 
             
+            # send reply to the server of the appropriate peer
+            conn = peer_client_dict[peer_client_id]
 
-            # REPLY only if I am NOT the head of the queue!! 
-            if self.request_queue.queue[0].pid != self.timestamp.pid:
-                # send reply to the server of the appropriate peer
-                conn = peer_client_dict[peer_client_id]
+            # update my clock before sending the REPLY
+            self.update_current_clock("Send REPLY", 0) 
 
-                # update my clock before sending the REPLY
-                self.update_current_clock("Send REPLY", 0) 
-
-                response_dict = {'type': 'REPLY', 'timestamp': self.timestamp.get_dict(), 'client_id': client_id}
-                # TODO: ADD SLEEP TIMER
-                conn.sendall(json.dumps(response_dict).encode())
-                logger.info(f"Message sent to client {peer_client_id} : " + str(response_dict))
+            response_dict = {'type': 'REPLY', 'timestamp': self.timestamp.get_dict(), 'client_id': client_id}
+            # TODO: ADD SLEEP TIMER
+            conn.sendall(json.dumps(response_dict).encode())
+            logger.info(f"Message sent to client {peer_client_id} : " + str(response_dict))
+            
             return 0
         elif msg_dict["type"] == "REPLY":
             # update my clock after receiving the REPLY
