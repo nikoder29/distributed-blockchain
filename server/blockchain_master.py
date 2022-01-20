@@ -92,6 +92,7 @@ class BlockchainMaster:
     def start_server(self):
         selector = selectors.DefaultSelector()
         self.lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.lsock.bind((SERVER_HOST, SERVER_PORT))
         self.lsock.listen()
         logger.info("Waiting on new connections...")

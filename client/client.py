@@ -9,7 +9,7 @@ import time
 import threading
 import types
 from queue import Queue
-
+import re
 from queue import PriorityQueue
 from constants import *
 from lamport_mutex_utils import *
@@ -27,43 +27,28 @@ class Client:
         self.peer_clients_queue = Queue()
         self.processor_queue = Queue()
         self.client_dict = client_dict
-
-        self.timestamp = Timestamp(1, os.getpid())
+        self.lamport_clock_lock = threading.Lock()
+        self.timestamp = Timestamp(1, client_id)
         self.request_queue = PriorityQueue()
-
-        # Testing the priority queue
-
-        #self.request_queue.put(Timestamp(10, 1234))
-        #self.request_queue.put(Timestamp(1, 4321))
-        #self.request_queue.put(Timestamp(3, 3758))
-        #self.request_queue.put(Timestamp(3, 2345))
-        #self.request_queue.put(Timestamp(6, 9577))
-
-        #while self.request_queue:
-        #    logger.info(repr(self.request_queue.get()))
 
         self.event = threading.Event()
         self.client_id = client_id
         self.client_dict = client_dict
-        # client_thread = threading.Thread(target=self.start_peer_clients, args=(client_dict, client_id, self.peer_clients_queue))
-        # client_thread.daemon = True
         self.peer_client_dict = {}
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_thread = threading.Thread(target=self.start_server, args=(client_dict, client_id, self.event, self.peer_client_dict, self.server_socket))
+        server_thread = threading.Thread(target=self.start_server, args=(client_dict, client_id, self.event,
+                                                                         self.peer_client_dict,
+                                                                         self.lamport_clock_lock
+                                                                         ))
         server_thread.daemon = True
         server_thread.start()
         time.sleep(15)
         self.populate_peer_client_dict()
+        time.sleep(20)
         self.start_master_client()
-        # self.start_client(host, port)
-
-        # self.host = host
-        # self.port = port
 
     def __del__(self):
         for _, conn in self.peer_client_dict.items():
             conn.close()
-        self.server_socket.close()
 
     @staticmethod
     def display_menu():
@@ -82,13 +67,13 @@ class Client:
         logger.debug('Message received from blockchain master : ' + repr(data))
         
         # update my clock after receiving a message from the server
-        self.update_current_clock("Receive from server", 0) 
+        self.update_current_clock("Receive from server", 0, self.lamport_clock_lock)
         
         return data
 
     def accept_wrapper(self, sock, selector):
         conn, addr = sock.accept()  # Should be ready to read
-        print('accepted connection from', addr)
+        logger.info(f'accepted connection from : {addr}')
         conn.setblocking(False)
         data = types.SimpleNamespace(addr=addr, inb=b'', outb=b'')
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
@@ -96,7 +81,7 @@ class Client:
 
         # print(selector.get_map())
 
-    def service_connection(self, key, mask, selector, peer_client_dict, client_id):
+    def service_connection(self, key, mask, selector, peer_client_dict, client_id, lamport_clock_lock):
         sock = key.fileobj
         data = key.data
         client_host, client_port = sock.getpeername()
@@ -104,10 +89,18 @@ class Client:
             recv_data = sock.recv(1024)  # Should be ready to read
             if recv_data:
                 peer_client_addr = client_host + ":" + str(client_port)
+                recv_data = recv_data.decode()
                 logger.info(f"Message received from client {peer_client_addr} : " + str(recv_data))
-                res = self.handle_message_from_peer(recv_data, client_id, peer_client_dict)
-                time.sleep(2)
-                return res
+                message_list_start_index = [_.start() for _ in re.finditer('{"type":', recv_data)]
+                no_of_messages = len(message_list_start_index)
+                total_res = 0
+                for i in range(no_of_messages-1):
+                    msg = recv_data[message_list_start_index[i] : message_list_start_index[i+1]]
+                    total_res += self.handle_message_from_peer(msg, client_id, peer_client_dict, lamport_clock_lock)
+                msg = recv_data[message_list_start_index[no_of_messages-1]:]
+                total_res += self.handle_message_from_peer(msg, client_id, peer_client_dict, lamport_clock_lock)
+                # time.sleep(2)
+                return total_res
                 # sock.sendall(str(response).encode())
                 # logger.info(f"Message sent to client {client_addr} : " + str(response))
             else:
@@ -116,27 +109,20 @@ class Client:
                 sock.close()
         return 0
 
-    def update_current_clock(self, event, new_clock):
-        logger.info(f" \n++ Lamport clock before updating (event = {event}): " + str(self.timestamp.lamport_clock))
-        old_clock = self.timestamp.lamport_clock
-        self.timestamp.lamport_clock = max(old_clock, new_clock) + 1
-        logger.info(f" \n++ Lamport clock after updating (event = {event}): " + str(self.timestamp.lamport_clock))
+    def update_current_clock(self, event, new_clock, lamport_clock_lock):
+        with lamport_clock_lock:
+            logger.info(f" ++ Lamport clock before updating (event = {event}): " + str(self.timestamp.lamport_clock))
+            old_clock = self.timestamp.lamport_clock
+            self.timestamp.lamport_clock = max(old_clock, new_clock) + 1
+            logger.info(f" ++ Lamport clock after updating (event = {event}): " + str(self.timestamp.lamport_clock))
 
-        
-
-    def start_server(self, client_dict, client_id, event, peer_client_dict, server_socket):
+    def start_server(self, client_dict, client_id, event, peer_client_dict, lamport_clock_lock):
         server_host = client_dict[client_id]["server_host"]
         server_port = client_dict[client_id]["server_port"]
-
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         selector = selectors.DefaultSelector()
-        # self.lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        while True:
-            try:
-                server_socket.bind((server_host, server_port))
-                break
-            except Exception as ex:
-                logger.error(ex)
-                time.sleep(5)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind((server_host, server_port))
 
         server_socket.listen()
         logger.info("Server is up and running!")
@@ -151,25 +137,31 @@ class Client:
                 if key.data is None:
                     self.accept_wrapper(key.fileobj, selector)
                 else:
-                    peer_reply_count += self.service_connection(key, mask, selector, peer_client_dict, client_id)
+                    peer_reply_count += self.service_connection(key, mask, selector, peer_client_dict,
+                                                                client_id, lamport_clock_lock)
                     if peer_reply_count == total_number_of_clients:
                         if self.request_queue.queue[0].pid == self.timestamp.pid:
                             # this set event will be read by the main client, before sending a request to the blockchain server
+                            logger.info("Self is at the top of the queue. Will access critical section now!")
                             event.set()
                             peer_reply_count = 0
 
+
     def wait_for_consensus_from_peers(self):
         # update my clock before broadcasting the REQUEST to peers
-        self.update_current_clock("Send REQUEST", 0) 
+        logger.info("Getting consensus from peers!")
+        self.update_current_clock("Send REQUEST", 0, self.lamport_clock_lock)
 
-        # Add the client's timestamp into its local queue
+        # Add a copy of the client's timestamp into its local queue
         self.request_queue.put(self.timestamp)
+        self.request_queue.put(Timestamp.copy(self.timestamp))
         logger.info(f"Request Queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
 
         request_dict = {"type": "REQUEST", 'timestamp': self.timestamp.get_dict(), "client_id": self.client_id}
 
         for client_id, conn in self.peer_client_dict.items():
             # TODO: ADD SLEEP TIMER
+
             conn.sendall(json.dumps(request_dict).encode())
             logger.info(f"Message sent to client {client_id} : " + str(request_dict))
         
@@ -180,7 +172,7 @@ class Client:
 
     def send_release_to_peers(self):
         # update my clock before sending the RELEASE
-        self.update_current_clock("Send RELEASE", 0) 
+        self.update_current_clock("Send RELEASE", 0, self.lamport_clock_lock)
 
         release_dict = {"type": "RELEASE", 'timestamp': self.timestamp.get_dict(), "client_id": self.client_id}
         for client_id, conn in self.peer_client_dict.items():
@@ -210,24 +202,29 @@ class Client:
         self.request_queue = new_queue
 
         logger.info(f"Request queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
-    
 
     def start_master_client(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-            # sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # sock.setblocking(False)
-            # client_socket.bind((client_dict[client_id]["client_host"], client_dict[client_id]["client_port"]))
             client_socket.connect((BLOCKCHAIN_SERVER_HOST, BLOCKCHAIN_SERVER_PORT))
             logger.info("Now connected to the blockchain server!")
+            self.wait_for_consensus_from_peers()
             self.handle_balance_transaction(client_socket)
+            self.send_release_to_peers()
 
             while True:
                 self.display_menu()
                 user_input = input("Client prompt >> ")
                 if user_input == "1":
+                    receiver_id = input("Enter receiver client id  >> ")
+                    # add check if receiver is available in the config list or not
+                    if receiver_id not in self.client_dict:
+                        logger.error("Client id does not exist. Please try again with a valid client id..")
+                        continue
+                    amount = input("Enter the amount in $$ to be transferred to the above client  >> ")
+
                     self.wait_for_consensus_from_peers()
                     self.handle_balance_transaction(client_socket)
-                    self.handle_transfer_transaction(client_socket)
+                    self.handle_transfer_transaction(client_socket, receiver_id, amount)
                     self.handle_balance_transaction(client_socket)
                     self.send_release_to_peers()
 
@@ -248,29 +245,22 @@ class Client:
     def handle_balance_transaction(self, client_socket):
         
         # update my clock before sending a message to the server.
-        self.update_current_clock("Send to server", 0) # This will increment the current clock by 1
+        self.update_current_clock("Send to server", 0, self.lamport_clock_lock) # This will increment the current clock by 1
        
-        msg_dict = {'type': 'balance_transaction', 'timestamp': self.timestamp.get_dict(), \
+        msg_dict = {'type': 'balance_transaction', 'timestamp': self.timestamp.get_dict(),
                     'client_id': self.client_id}
         response = self.get_response_from_server(msg_dict, client_socket)
         logger.info("Your current balance is : $" + response)
 
-    def handle_transfer_transaction(self, client_socket):
-        receiver_id = input("Enter receiver client id  >> ")
-        # add check if receiver is available in the config list or not
-        if receiver_id not in self.client_dict:
-            logger.error("Client id does not exist. Please try again with a valid client id..")
-            return
-        # receiver_addr = self.client_dict[receiver_id]['host'] + ":" + str(self.client_dict[receiver_id]['port'])
-        amount = input("Enter the amount in $$ to be transferred to the above client  >> ")
-
+    def handle_transfer_transaction(self, client_socket, receiver_id, amount):
         # assuming that all clients will do the right thing, and not impersonate self as any other client
-        # we can enforce this by not sending the sender client address, and having the blockchain figure that out from the connection object
+        # we can enforce this by not sending the sender client address, and having the blockchain figure
+        # that out from the connection object
         
         # update my clock before sending a message to the server.
-        self.update_current_clock("Send to server", 0) # This will increment the current clock by 1
+        self.update_current_clock("Send to server", 0, self.lamport_clock_lock) # This will increment the current clock by 1
 
-        msg_dict = {'type': 'transfer_transaction', 'timestamp': self.timestamp.get_dict(), \
+        msg_dict = {'type': 'transfer_transaction', 'timestamp': self.timestamp.get_dict(),
                     'sender': self.client_id, 'receiver': receiver_id, 'amount': amount}
 
         response = self.get_response_from_server(msg_dict, client_socket)
@@ -281,9 +271,9 @@ class Client:
         elif response == '1':
             print("INCORRECT")
             # print("The transaction failed due to insufficient funds!")
-        elif response == '2':
-            print("INCORRECT")
-            # print("The transaction failed due to an error. Try again after sometime !")
+        # elif response == '2':
+        #     print("INCORRECT")
+        #     # print("The transaction failed due to an error. Try again after sometime !")
 
     def populate_peer_client_dict(self):
         # connect to the server of all other clients
@@ -297,18 +287,12 @@ class Client:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             # sock.setblocking(True)
             logger.info("Trying to connect to peer : " + other_client_id)
-            while True:
-                exit_code = sock.connect_ex(server_addr)
-                print(exit_code)
-                time.sleep(2)
-                if exit_code == 0 or exit_code == 56:
-                    break
+            sock.connect(server_addr)
             logger.info("Now connected to peer : " + other_client_id)
             self.peer_client_dict[other_client_id] = sock
 
-
-    def handle_message_from_peer(self, msg, client_id, peer_client_dict):
-        msg_dict = json.loads(msg.decode())
+    def handle_message_from_peer(self, msg, client_id, peer_client_dict, lamport_clock_lock):
+        msg_dict = json.loads(msg)
         peer_client_id = msg_dict["client_id"]
 
         # Extract the peer's Timestamp
@@ -325,13 +309,13 @@ class Client:
             logger.info(f"Request queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
             
             # update my clock after receiving the REQUEST
-            self.update_current_clock("Receive REQUEST", peer_clock) 
+            self.update_current_clock("Receive REQUEST", peer_clock, lamport_clock_lock)
             
             # send reply to the server of the appropriate peer
             conn = peer_client_dict[peer_client_id]
 
             # update my clock before sending the REPLY
-            self.update_current_clock("Send REPLY", 0) 
+            self.update_current_clock("Send REPLY", 0, lamport_clock_lock)
 
             response_dict = {'type': 'REPLY', 'timestamp': self.timestamp.get_dict(), 'client_id': client_id}
             # TODO: ADD SLEEP TIMER
@@ -341,26 +325,27 @@ class Client:
             return 0
         elif msg_dict["type"] == "REPLY":
             # update my clock after receiving the REPLY
-            self.update_current_clock("Receive REPLY", peer_clock) 
+            self.update_current_clock("Receive REPLY", peer_clock, lamport_clock_lock)
             return 1
         elif msg_dict["type"] == "RELEASE":
             # Remove the queue entry corresponding to the sender of the RELEASE. 
             self.update_request_queue(peer_pid)
 
             # update my clock after receiving the RELEASE
-            self.update_current_clock("Receive RELEASE", peer_clock)
+            self.update_current_clock("Receive RELEASE", peer_clock, lamport_clock_lock)
 
             return 0
 
     def handle_quit(self, client_socket):
         # update my clock before sending a message to the server.
-        self.update_current_clock("Send to server", 0)
+        self.update_current_clock("Send to server", 0, self.lamport_clock_lock)
         
-        msg_dict = {'type': 'quit', \
+        msg_dict = {'type': 'quit',
                     'timestamp': self.timestamp.get_dict()}
         
         self.get_response_from_server(msg_dict, client_socket)
         logger.info("Bye..have a good one!")
+
 
 if __name__ == '__main__':
     argv_client_id = sys.argv[1]
