@@ -153,7 +153,6 @@ class Client:
         self.update_current_clock("Send REQUEST", 0, self.lamport_clock_lock)
 
         # Add a copy of the client's timestamp into its local queue
-        self.request_queue.put(self.timestamp)
         self.request_queue.put(Timestamp.copy(self.timestamp))
         logger.info(f"Request Queue at client {self.client_id} : " + str(sorted(self.request_queue.queue)))
 
