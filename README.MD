@@ -21,8 +21,9 @@ How to handle client discovery:
 
 
 Open Questions : 
-1. How to handle blockchain server UI
+1. How to handle blockchain server UI - done
 2. What to do about #6 in the problem statement
+3. Shall we send REQUEST / REPLY / RELEASE to self client as well.
 
 References:
 1. https://realpython.com/python-sockets/ 
