@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 class Client:
 
     def __init__(self, client_id, client_dict):
-        self.peer_clients_queue = Queue()
-        self.processor_queue = Queue()
         self.client_dict = client_dict
         self.lamport_clock_lock = threading.Lock()
         self.timestamp = Timestamp(1, client_id)
@@ -207,14 +205,14 @@ class Client:
 
             while True:
                 self.display_menu()
-                user_input = input("Client prompt >> ")
+                user_input = input("Client prompt >> ").strip()
                 if user_input == "1":
-                    receiver_id = input("Enter receiver client id  >> ")
+                    receiver_id = input("Enter receiver client id  >> ").strip()
                     # add check if receiver is available in the config list or not
                     if receiver_id not in self.client_dict:
                         logger.error("Client id does not exist. Please try again with a valid client id..")
                         continue
-                    amount = input("Enter the amount in $$ to be transferred to the above client  >> ")
+                    amount = input("Enter the amount in $$ to be transferred to the above client  >> ").strip()
 
                     self.wait_for_consensus_from_peers()
                     self.handle_balance_transaction(client_socket)

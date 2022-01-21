@@ -49,7 +49,7 @@ class BlockchainMaster:
     def start_client(self):
         while True:
             self.display_menu()
-            user_input = input("Blockchain client prompt >> ")
+            user_input = input("Blockchain client prompt >> ").strip()
             if user_input == '1':
                 self.display_blockchain()
             elif user_input == '2':
