@@ -56,7 +56,7 @@ class Client:
         msg_str = json.dumps(msg_dict)
         
         logger.debug('Message sent to blockchain master : ' + msg_str)
-        time.sleep(2)
+        time.sleep(3)
         client_socket.sendall(msg_str.encode())
         data = client_socket.recv(1024).decode()
         logger.debug('Message received from blockchain master : ' + repr(data))
@@ -154,7 +154,7 @@ class Client:
 
         for client_id, conn in self.peer_client_dict.items():
             # TODO: ADD SLEEP TIMER
-
+            time.sleep(3)
             conn.sendall(json.dumps(request_dict).encode())
             logger.info(f"Message sent to client {client_id} : " + str(request_dict))
 
@@ -168,7 +168,7 @@ class Client:
 
         release_dict = {"type": "RELEASE", 'timestamp': self.timestamp.get_dict(), "client_id": self.client_id}
         for client_id, conn in self.peer_client_dict.items():
-            time.sleep(2)
+            time.sleep(3)
             conn.sendall(json.dumps(release_dict).encode())
             logger.info(f"Message sent to client {client_id} : " + str(release_dict))
         # waiting for consensus ( REPLY ) from all the peers, to be set by the server
@@ -199,9 +199,9 @@ class Client:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
             client_socket.connect((BLOCKCHAIN_SERVER_HOST, BLOCKCHAIN_SERVER_PORT))
             logger.info("Now connected to the blockchain server!")
-            self.wait_for_consensus_from_peers()
+            # self.wait_for_consensus_from_peers()
             self.handle_balance_transaction(client_socket)
-            self.send_release_to_peers()
+            # self.send_release_to_peers()
 
             while True:
                 self.display_menu()
@@ -308,6 +308,7 @@ class Client:
 
             response_dict = {'type': 'REPLY', 'timestamp': self.timestamp.get_dict(), 'client_id': self.client_id}
             # TODO: ADD SLEEP TIMER
+            time.sleep(3)
             conn.sendall(json.dumps(response_dict).encode())
             logger.info(f"Message sent to client {peer_client_id} : " + str(response_dict))
             
