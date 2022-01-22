@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 class Client:
 
     def __init__(self, client_id, client_dict):
-        self.peer_clients_queue = Queue()
-        self.processor_queue = Queue()
         self.client_dict = client_dict
         self.lamport_clock_lock = threading.Lock()
         self.timestamp = Timestamp(1, client_id)
@@ -58,7 +56,7 @@ class Client:
         msg_str = json.dumps(msg_dict)
         
         logger.debug('Message sent to blockchain master : ' + msg_str)
-        time.sleep(2)
+        time.sleep(3)
         client_socket.sendall(msg_str.encode())
         data = client_socket.recv(1024).decode()
         logger.debug('Message received from blockchain master : ' + repr(data))
@@ -156,7 +154,7 @@ class Client:
 
         for client_id, conn in self.peer_client_dict.items():
             # TODO: ADD SLEEP TIMER
-
+            time.sleep(3)
             conn.sendall(json.dumps(request_dict).encode())
             logger.info(f"Message sent to client {client_id} : " + str(request_dict))
 
@@ -170,7 +168,7 @@ class Client:
 
         release_dict = {"type": "RELEASE", 'timestamp': self.timestamp.get_dict(), "client_id": self.client_id}
         for client_id, conn in self.peer_client_dict.items():
-            time.sleep(2)
+            time.sleep(3)
             conn.sendall(json.dumps(release_dict).encode())
             logger.info(f"Message sent to client {client_id} : " + str(release_dict))
         # waiting for consensus ( REPLY ) from all the peers, to be set by the server
@@ -201,20 +199,20 @@ class Client:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
             client_socket.connect((BLOCKCHAIN_SERVER_HOST, BLOCKCHAIN_SERVER_PORT))
             logger.info("Now connected to the blockchain server!")
-            self.wait_for_consensus_from_peers()
+            # self.wait_for_consensus_from_peers()
             self.handle_balance_transaction(client_socket)
-            self.send_release_to_peers()
+            # self.send_release_to_peers()
 
             while True:
                 self.display_menu()
-                user_input = input("Client prompt >> ")
+                user_input = input("Client prompt >> ").strip()
                 if user_input == "1":
-                    receiver_id = input("Enter receiver client id  >> ")
+                    receiver_id = input("Enter receiver client id  >> ").strip()
                     # add check if receiver is available in the config list or not
                     if receiver_id not in self.client_dict:
                         logger.error("Client id does not exist. Please try again with a valid client id..")
                         continue
-                    amount = input("Enter the amount in $$ to be transferred to the above client  >> ")
+                    amount = input("Enter the amount in $$ to be transferred to the above client  >> ").strip()
 
                     self.wait_for_consensus_from_peers()
                     self.handle_balance_transaction(client_socket)
@@ -310,6 +308,7 @@ class Client:
 
             response_dict = {'type': 'REPLY', 'timestamp': self.timestamp.get_dict(), 'client_id': self.client_id}
             # TODO: ADD SLEEP TIMER
+            time.sleep(3)
             conn.sendall(json.dumps(response_dict).encode())
             logger.info(f"Message sent to client {peer_client_id} : " + str(response_dict))
             
